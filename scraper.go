@@ -48,12 +48,10 @@ func Scrape(baseURL string) ([]Proxy, error) {
 	var allProxies []Proxy
 	seen := make(map[string]bool)
 
-	// 配置强力翻墙客户端，确保能拉下被墙的 GitHub raw
-	proxyURL, _ := url.Parse("http://127.0.0.1:7890")
+	// 在 Zeabur/海外服务器无需翻墙，直接直连获取源
+	// 移除本地调试专用的 127.0.0.1:7890
 	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		},
+		Transport: &http.Transport{},
 		Timeout: 30 * time.Second, // 防止单个源卡死
 	}
 	
