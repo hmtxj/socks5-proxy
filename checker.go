@@ -74,29 +74,31 @@ func httpGetViaProxy(p Proxy, targetURL string, timeout time.Duration) (latencyM
 			TLSHandshakeTimeout: timeout,
 		},
 		Timeout: timeout,
-		// 不跟随重定向（和 NekoBox 一样：收到 3xx 也算成功）
+		// 不跟随重定向（和 NekoBox 一样）
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
 	defer client.CloseIdleConnections()
 
-	start := time.Now()
-
-	resp, err := client.Get(targetURL)
-	if err != nil {
-		return 0, err
+	// 参考 NekoBox RTT 模式：做 2 次请求
+	// 第 1 次：建立连接 + TLS 握手（预热）
+	// 第 2 次：复用连接，测纯 HTTP RTT
+	// 不稳定的节点往往第 2 次会失败
+	for i := 0; i < 2; i++ {
+		start := time.Now()
+		resp, err := client.Get(targetURL)
+		if err != nil {
+			return 0, err
+		}
+		resp.Body.Close()
+		// 第 2 次请求的耗时才是真正的 RTT
+		if i == 1 {
+			latencyMs = time.Since(start).Milliseconds()
+		}
 	}
-	resp.Body.Close()
 
-	latencyMs = time.Since(start).Milliseconds()
-
-	// HTTP 状态码 2xx/3xx/403 都算"连通"（403 说明 Cloudflare 能到达，只是被 WAF 拦了）
-	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
-		return latencyMs, nil
-	}
-
-	return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+	return latencyMs, nil
 }
 
 // LookupGeo 查询 IP 归属地
