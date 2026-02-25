@@ -49,13 +49,12 @@ func main() {
 
 	pool := NewProxyPool()
 
-	// Initial scrape + check (MUST be non-blocking for cloud health checks to pass)
-	go func() {
-		refreshPool(cfg, pool)
-		if pool.Size() == 0 {
-			log.Printf("[warn] no alive proxies found, will retry on next scrape cycle")
-		}
-	}()
+	// Initial scrape + check
+	refreshPool(cfg, pool)
+
+	if pool.Size() == 0 {
+		log.Printf("[warn] no alive proxies found, will retry on next scrape cycle")
+	}
 
 	// Background: periodic scrape + manual refresh
 	go func() {
