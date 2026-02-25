@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -84,12 +85,8 @@ func (s *StatusServer) getStatusData() StatusData {
 		activeRegion = "-"
 	}
 
-	// Get test target
-	testHost, testPort := getTestTarget()
-	targetStr := testHost
-	if testPort != 443 {
-		targetStr += ":" + strconv.Itoa(testPort)
-	}
+	// 获取测试目标 URL
+	targetStr := getTestTargetURL()
 
 	return StatusData{
 		Total:        len(proxies),
@@ -152,21 +149,13 @@ func (s *StatusServer) handleTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	host := req.Target
-	port := 443
-
-	for i, c := range host {
-		if c == ':' {
-			p, err := strconv.Atoi(host[i+1:])
-			if err == nil {
-				port = p
-				host = host[:i]
-			}
-			break
-		}
+	// 直接保存完整 URL（如 https://accounts.x.ai/sign-up/）
+	targetURL := req.Target
+	if targetURL != "" && !strings.HasPrefix(targetURL, "http") {
+		targetURL = "https://" + targetURL
 	}
 
-	setTestTarget(host, port)
+	setTestTargetURL(targetURL)
 	TriggerRefresh()
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status":"target updated and refreshing"}`))

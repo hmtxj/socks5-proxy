@@ -13,9 +13,8 @@ var (
 	scrapeMu       sync.RWMutex
 	refreshChan    = make(chan struct{}, 1) // manual refresh trigger
 
-	testTargetHost string = "www.google.com" // 默认使用 Google，TLS 验证可靠且兼容性好
-	testTargetPort int    = 443
-	testTargetMu   sync.RWMutex
+	testTargetURL string = "https://accounts.x.ai/sign-up/" // 默认测试注册目标站
+	testTargetMu  sync.RWMutex
 )
 
 func getScrapeTimes() (last, next time.Time) {
@@ -24,16 +23,15 @@ func getScrapeTimes() (last, next time.Time) {
 	return lastScrapeTime, nextScrapeTime
 }
 
-func getTestTarget() (host string, port int) {
+func getTestTargetURL() string {
 	testTargetMu.RLock()
 	defer testTargetMu.RUnlock()
-	return testTargetHost, testTargetPort
+	return testTargetURL
 }
 
-func setTestTarget(host string, port int) {
+func setTestTargetURL(u string) {
 	testTargetMu.Lock()
-	testTargetHost = host
-	testTargetPort = port
+	testTargetURL = u
 	testTargetMu.Unlock()
 }
 
