@@ -16,6 +16,7 @@ type Proxy struct {
 	Port    string
 	Country string
 	City    string
+	Latency int64 // 延迟（毫秒），URL 测速结果
 }
 
 func (p Proxy) Addr() string {

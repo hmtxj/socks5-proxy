@@ -47,6 +47,7 @@ func CheckProxies(proxies []Proxy, timeout time.Duration, maxConcurrent int) []P
 			// 通过代理发 HTTP GET 请求到目标 URL（参考 NekoBox 测速逻辑）
 			latency, err := httpGetViaProxy(px, targetURL, timeout)
 			if err == nil {
+				px.Latency = latency
 				log.Printf("[checker] %s OK %dms (%s %s)", px.Addr(), latency, px.Country, px.City)
 				mu.Lock()
 				alive = append(alive, px)

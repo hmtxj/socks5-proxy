@@ -28,6 +28,7 @@ type ProxyStatus struct {
 	Country string `json:"country"`
 	City    string `json:"city"`
 	Active  bool   `json:"active"`
+	Latency int64  `json:"latency"` // 延迟毫秒数
 }
 
 func NewStatusServer(pool *ProxyPool) *StatusServer {
@@ -69,6 +70,7 @@ func (s *StatusServer) getStatusData() StatusData {
 			Country: p.Country,
 			City:    p.City,
 			Active:  i == activeIdx,
+			Latency: p.Latency,
 		})
 	}
 
@@ -251,14 +253,14 @@ h1{font-size:1.3rem;color:#38bdf8}
       <div class="loc">{{$p.Country}}{{if $p.City}}, {{$p.City}}{{end}}</div>
     </div>
   </div>
-  <span class="status {{if $p.Active}}in-use{{else}}standby{{end}}">{{if $p.Active}}IN USE{{else}}standby{{end}}</span>
+  <span class="status {{if $p.Active}}in-use{{else}}standby{{end}}">{{if $p.Active}}IN USE{{else}}{{$p.Latency}} ms{{end}}</span>
 </div>
 {{end}}
 </div>
 {{else}}
 <p class="empty">No proxies available. Waiting for next scrape cycle...</p>
 {{end}}
-<p class="note">Auto-refresh 30s | Beijing Time (UTC+8) | Click proxy to switch | Dynamically Verified (TLS)</p>
+<p class="note">Auto-refresh 30s | Beijing Time (UTC+8) | Click proxy to switch | URL Tested</p>
 <p class="note">Proxy source: <a href="https://socks5-proxy.github.io/" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:none">socks5-proxy.github.io</a></p>
 </div>
 <script>
