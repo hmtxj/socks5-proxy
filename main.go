@@ -12,6 +12,10 @@ var (
 	nextScrapeTime time.Time
 	scrapeMu       sync.RWMutex
 	refreshChan    = make(chan struct{}, 1) // manual refresh trigger
+
+	testTargetHost string = "x.com" // 默认改用严格站
+	testTargetPort int    = 443
+	testTargetMu   sync.RWMutex
 )
 
 func getScrapeTimes() (last, next time.Time) {
@@ -19,6 +23,20 @@ func getScrapeTimes() (last, next time.Time) {
 	defer scrapeMu.RUnlock()
 	return lastScrapeTime, nextScrapeTime
 }
+
+func getTestTarget() (host string, port int) {
+	testTargetMu.RLock()
+	defer testTargetMu.RUnlock()
+	return testTargetHost, testTargetPort
+}
+
+func setTestTarget(host string, port int) {
+	testTargetMu.Lock()
+	testTargetHost = host
+	testTargetPort = port
+	testTargetMu.Unlock()
+}
+
 
 func main() {
 	cfg := ParseConfig()

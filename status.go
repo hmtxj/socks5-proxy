@@ -18,6 +18,7 @@ type StatusData struct {
 	ActiveRegion string        `json:"active_region"`
 	LastScrape   string        `json:"last_scrape"`
 	NextScrape   string        `json:"next_scrape"`
+	TargetHost   string        `json:"target_host"`
 	Proxies      []ProxyStatus `json:"proxies"`
 }
 
@@ -40,6 +41,7 @@ func (s *StatusServer) Start(addr string) error {
 	mux.HandleFunc("/api/status", s.handleAPI)
 	mux.HandleFunc("/api/refresh", s.handleRefresh)
 	mux.HandleFunc("/api/switch", s.handleSwitch)
+	mux.HandleFunc("/api/target", s.handleTarget)
 	return http.ListenAndServe(addr, mux)
 }
 
@@ -82,12 +84,20 @@ func (s *StatusServer) getStatusData() StatusData {
 		activeRegion = "-"
 	}
 
+	// Get test target
+	testHost, testPort := getTestTarget()
+	targetStr := testHost
+	if testPort != 443 {
+		targetStr += ":" + strconv.Itoa(testPort)
+	}
+
 	return StatusData{
 		Total:        len(proxies),
 		ActiveProxy:  activeProxy,
 		ActiveRegion: activeRegion,
 		LastScrape:   lastStr,
 		NextScrape:   nextStr,
+		TargetHost:   targetStr,
 		Proxies:      ps,
 	}
 }
@@ -127,6 +137,39 @@ func (s *StatusServer) handleSwitch(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(`{"status":"no proxies available"}`))
 		}
 	}
+}
+
+func (s *StatusServer) handleTarget(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Target string `json:"target"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	host := req.Target
+	port := 443
+
+	for i, c := range host {
+		if c == ':' {
+			p, err := strconv.Atoi(host[i+1:])
+			if err == nil {
+				port = p
+				host = host[:i]
+			}
+			break
+		}
+	}
+
+	setTestTarget(host, port)
+	TriggerRefresh()
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"target updated and refreshing"}`))
 }
 
 func (s *StatusServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -175,6 +218,9 @@ h1{font-size:1.3rem;color:#38bdf8}
 .gh-link{color:#64748b;text-decoration:none;display:inline-flex;align-items:center;gap:4px;font-size:0.8rem;transition:color 0.15s}
 .gh-link:hover{color:#e2e8f0}
 .gh-link svg{width:18px;height:18px;fill:currentColor}
+.target-control{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;margin:12px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.target-control input{flex:1;min-width:180px;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px 12px;border-radius:6px;font-family:monospace;outline:none}
+.target-control input:focus{border-color:#38bdf8}
 </style>
 </head>
 <body>
@@ -193,12 +239,17 @@ h1{font-size:1.3rem;color:#38bdf8}
     <span class="region">{{.ActiveRegion}}</span>
   </div>
 </div>
+<div class="target-control">
+  <span style="font-size:0.85rem;color:#94a3b8;font-weight:bold;">Test Target:</span>
+  <input type="text" id="targetInput" value="{{.TargetHost}}" placeholder="x.com:443" autocomplete="off">
+  <button class="btn" style="background:#4ade80;color:#064e3b;" onclick="doSetTarget(this)">Save & Retest</button>
+</div>
 <div class="time-info">
   <div>
     <div class="time-item">Last: <span>{{if .LastScrape}}{{.LastScrape}}{{else}}N/A{{end}}</span></div>
     <div class="time-item">Next: <span>{{if .NextScrape}}{{.NextScrape}}{{else}}N/A{{end}}</span></div>
   </div>
-  <button class="btn" onclick="doRefresh(this)">Refresh Pool</button>
+  <button class="btn" onclick="doRefresh(this)">Force Refresh</button>
 </div>
 {{if .Proxies}}
 <div class="list">
@@ -218,7 +269,7 @@ h1{font-size:1.3rem;color:#38bdf8}
 {{else}}
 <p class="empty">No proxies available. Waiting for next scrape cycle...</p>
 {{end}}
-<p class="note">Auto-refresh 30s | Beijing Time (UTC+8) | Click proxy to switch | Google-verified</p>
+<p class="note">Auto-refresh 30s | Beijing Time (UTC+8) | Click proxy to switch | Dynamically Verified (TLS)</p>
 <p class="note">Proxy source: <a href="https://socks5-proxy.github.io/" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:none">socks5-proxy.github.io</a></p>
 </div>
 <script>
@@ -234,10 +285,26 @@ function doRefresh(btn) {
   btn.disabled = true;
   btn.textContent = 'Refreshing...';
   fetch('/api/refresh').then(function() {
-    setTimeout(function() { location.reload(); }, 15000);
+    setTimeout(function() { location.reload(); }, 10000);
   }).catch(function() {
     btn.disabled = false;
-    btn.textContent = 'Refresh Pool';
+    btn.textContent = 'Force Refresh';
+  });
+}
+function doSetTarget(btn) {
+  const t = document.getElementById('targetInput').value.trim();
+  if(!t) return;
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  fetch('/api/target', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target: t })
+  }).then(function(res) {
+    setTimeout(function() { location.reload(); }, 10000);
+  }).catch(function() {
+    btn.disabled = false;
+    btn.textContent = 'Save & Retest';
   });
 }
 </script>

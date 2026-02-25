@@ -5,11 +5,27 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 )
 
-var proxyRegex = regexp.MustCompile(`socks5://(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)`)
+var (
+	// 放宽匹配规则，可以匹配带有 "socks5://" 前缀的，也可以直接匹配纯数字的 "192.168.1.1:1080" 格式
+	proxyRegex = regexp.MustCompile(`(?:socks[45]://)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)`)
+	
+	// 高质量全球 SOCKS5 代理源列表
+	defaultSources = []string{
+		"https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=10000&country=all&ssl=all&anonymity=all",
+		"https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+		"https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
+		"https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
+		"https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks5.txt",
+		"https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt",
+		"https://raw.githubusercontent.com/Boster123/Free_Proxy_List/main/socks5.txt",
+		"https://raw.githubusercontent.com/ErcinDedeoglu/proxies/main/proxies/socks5.txt",
+	}
+)
 
 type Proxy struct {
 	IP      string
@@ -26,38 +42,64 @@ func (p Proxy) String() string {
 	return fmt.Sprintf("socks5://%s:%s", p.IP, p.Port)
 }
 
-func Scrape(url string) ([]Proxy, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("fetch failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body failed: %w", err)
-	}
-
-	matches := proxyRegex.FindAllStringSubmatch(string(body), -1)
+func Scrape(baseURL string) ([]Proxy, error) {
+	// 忽略传入的单源，直接爬取写死的所有多源列表
+	var allProxies []Proxy
 	seen := make(map[string]bool)
-	var proxies []Proxy
 
-	for _, m := range matches {
-		addr := m[1] + ":" + m[2]
-		if seen[addr] {
+	// 配置强力翻墙客户端，确保能拉下被墙的 GitHub raw
+	proxyURL, _ := url.Parse("http://127.0.0.1:7890")
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+		Timeout: 30 * time.Second, // 防止单个源卡死
+	}
+	
+	for _, sourceUrl := range defaultSources {
+		log.Printf("[scraper] Fetching from: %s", sourceUrl)
+		
+		req, _ := http.NewRequest("GET", sourceUrl, nil)
+		resp, err := client.Do(req)
+		
+		if err != nil {
+			log.Printf("[scraper] source failed %s: %v", sourceUrl, err)
 			continue
 		}
-		seen[addr] = true
-		proxies = append(proxies, Proxy{
-			IP:   strings.TrimSpace(m[1]),
-			Port: strings.TrimSpace(m[2]),
-		})
+		
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close() // 及时关闭
+		if err != nil {
+			continue
+		}
+
+		matches := proxyRegex.FindAllStringSubmatch(string(body), -1)
+		count := 0
+		for _, m := range matches {
+			addr := m[1] + ":" + m[2]
+			if seen[addr] {
+				continue
+			}
+			seen[addr] = true
+			allProxies = append(allProxies, Proxy{
+				IP:   strings.TrimSpace(m[1]),
+				Port: strings.TrimSpace(m[2]),
+			})
+			count++
+		}
+		log.Printf("[scraper] ✅ Extracted %d unique proxies from %s", count, sourceUrl)
 	}
 
-	log.Printf("[scraper] fetched %d proxies from %s", len(proxies), url)
-	return proxies, nil
+	total := len(allProxies)
+	if total == 0 {
+		return nil, fmt.Errorf("all sources failed or returned 0 proxies")
+	}
+	
+	log.Printf("[scraper] 🎉 Total extracted raw proxies: %d", total)
+	return allProxies, nil
 }

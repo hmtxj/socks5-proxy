@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -16,8 +17,6 @@ var blockedCountries = map[string]bool{
 	"hong kong": true,
 }
 
-// CheckProxies concurrently checks a list of proxies.
-// Filters out CN/HK IPs, tests Google connectivity.
 func CheckProxies(proxies []Proxy, timeout time.Duration, maxConcurrent int) []Proxy {
 	var (
 		mu    sync.Mutex
@@ -25,6 +24,8 @@ func CheckProxies(proxies []Proxy, timeout time.Duration, maxConcurrent int) []P
 		wg    sync.WaitGroup
 		sem   = make(chan struct{}, maxConcurrent)
 	)
+
+	host, port := getTestTarget()
 
 	for _, p := range proxies {
 		wg.Add(1)
@@ -39,11 +40,11 @@ func CheckProxies(proxies []Proxy, timeout time.Duration, maxConcurrent int) []P
 			px.City = strings.TrimSpace(city)
 
 			if blockedCountries[strings.ToLower(px.Country)] {
-				log.Printf("[checker] %s skipped (%s)", px.Addr(), px.Country)
+				// log.Printf("[checker] %s skipped (%s)", px.Addr(), px.Country)
 				return
 			}
 
-			if checkGoogle(px, timeout) {
+			if checkTarget(px, host, port, timeout) {
 				log.Printf("[checker] %s OK (%s %s)", px.Addr(), px.Country, px.City)
 				mu.Lock()
 				alive = append(alive, px)
@@ -53,12 +54,12 @@ func CheckProxies(proxies []Proxy, timeout time.Duration, maxConcurrent int) []P
 	}
 
 	wg.Wait()
-	log.Printf("[checker] %d/%d proxies alive (Google-verified, non-CN/HK)", len(alive), len(proxies))
+	log.Printf("[checker] %d/%d proxies alive (Verified %s:%d, non-CN/HK)", len(alive), len(proxies), host, port)
 	return alive
 }
 
-// checkGoogle connects through the proxy to Google's 204 endpoint.
-func checkGoogle(p Proxy, timeout time.Duration) bool {
+// checkTarget connects through the proxy to target endpoint and verify TLS if port is 443.
+func checkTarget(p Proxy, target string, port int, timeout time.Duration) bool {
 	conn, err := net.DialTimeout("tcp", p.Addr(), timeout)
 	if err != nil {
 		return false
@@ -75,11 +76,10 @@ func checkGoogle(p Proxy, timeout time.Duration) bool {
 		return false
 	}
 
-	// Connect to www.google.com:80 through proxy
-	target := "www.google.com"
+	// Connect to Target through SOCKS5 proxy
 	req := []byte{0x05, 0x01, 0x00, 0x03, byte(len(target))}
 	req = append(req, []byte(target)...)
-	req = append(req, 0x00, 0x50) // port 80
+	req = append(req, byte(port>>8), byte(port&0xff))
 
 	if _, err := conn.Write(req); err != nil {
 		return false
@@ -91,19 +91,33 @@ func checkGoogle(p Proxy, timeout time.Duration) bool {
 		return false
 	}
 
-	// Send HTTP request to Google's generate_204 endpoint
-	httpReq := "GET /generate_204 HTTP/1.1\r\nHost: www.google.com\r\nConnection: close\r\n\r\n"
+	// SOCKS5 relay established successfully.
+	// If the port is 443, mandate a full TLS handshake!
+	if port == 443 {
+		tlsConn := tls.Client(conn, &tls.Config{
+			ServerName:         target,
+			InsecureSkipVerify: true, // We only care if we can handshake
+		})
+		err = tlsConn.Handshake()
+		tlsConn.Close()
+		if err != nil {
+			return false // Intercepted or blocked by CDN/Firewall
+		}
+		return true // TLS Handshake success
+	}
+
+	// For non-443 ports, send a simple HEAD request
+	httpReq := fmt.Sprintf("HEAD / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", target)
 	if _, err := conn.Write([]byte(httpReq)); err != nil {
 		return false
 	}
 
 	respBuf := make([]byte, 512)
 	n, err = conn.Read(respBuf)
-	if err != nil || n < 12 {
+	if err != nil || n < 4 {
 		return false
 	}
 
-	// Check we got HTTP response (200 or 204 both fine)
 	return string(respBuf[:4]) == "HTTP"
 }
 
