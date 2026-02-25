@@ -50,7 +50,6 @@ func Scrape(baseURL string) ([]Proxy, error) {
 	// 在 Zeabur/海外服务器无需翻墙，直接直连获取源
 	// 移除本地调试专用的 127.0.0.1:7890
 	client := &http.Client{
-		Transport: &http.Transport{},
 		Timeout: 30 * time.Second, // 防止单个源卡死
 	}
 	

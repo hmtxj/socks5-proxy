@@ -26,10 +26,10 @@ func ParseConfig() *Config {
 	flag.Parse()
 
 	// Cloud deployment: always use fixed ports
-	// SOCKS5 on 1080, status on 8080
-	if os.Getenv("PORT") != "" {
+	// SOCKS5 on 1080, status on given PORT
+	if port := os.Getenv("PORT"); port != "" {
 		cfg.ListenAddr = "0.0.0.0:1080"
-		cfg.StatusAddr = "0.0.0.0:8080"
+		cfg.StatusAddr = "0.0.0.0:" + port
 	}
 
 	return cfg
