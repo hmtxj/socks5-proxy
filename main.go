@@ -13,7 +13,7 @@ var (
 	scrapeMu       sync.RWMutex
 	refreshChan    = make(chan struct{}, 1) // manual refresh trigger
 
-	testTargetHost string = "x.com" // 默认改用严格站
+	testTargetHost string = "www.google.com" // 默认使用 Google，TLS 验证可靠且兼容性好
 	testTargetPort int    = 443
 	testTargetMu   sync.RWMutex
 )
