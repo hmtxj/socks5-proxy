@@ -6,16 +6,17 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 )
 
 var (
-	// 放宽匹配规则，可以匹配带有 "socks5://" 前缀的，也可以直接匹配纯数字的 "192.168.1.1:1080" 格式
-	proxyRegex = regexp.MustCompile(`(?:socks[45]://)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)`)
-	
-	// 高质量全球 SOCKS5 代理源列表
+	// 匹配代理地址：支持 "socks5://IP:PORT" 和纯 "IP:PORT" 格式
+	proxyRegex = regexp.MustCompile(`(?:socks[45]://)?(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}):(\\d+)`)
+
+	// 多源代理列表
 	defaultSources = []string{
 		"https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=10000&country=all&ssl=all&anonymity=all",
 		"https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
@@ -43,38 +44,50 @@ func (p Proxy) String() string {
 	return fmt.Sprintf("socks5://%s:%s", p.IP, p.Port)
 }
 
+// buildHTTPClient 根据运行环境创建 HTTP 客户端。
+// 云端（Zeabur/Railway）直连；本地环境走 127.0.0.1:7890 翻墙代理。
+func buildHTTPClient() *http.Client {
+	transport := &http.Transport{}
+
+	if os.Getenv("PORT") == "" {
+		// 本地环境：通过 Clash 代理拉取被墙的 GitHub raw
+		proxyURL, _ := url.Parse("http://127.0.0.1:7890")
+		transport.Proxy = http.ProxyURL(proxyURL)
+		log.Printf("[scraper] 本地模式，使用代理 127.0.0.1:7890")
+	} else {
+		// 云端环境：直连（Zeabur/Railway 服务器不受墙限制）
+		log.Printf("[scraper] 云端模式，直连拉取")
+	}
+
+	return &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
+}
+
 func Scrape(baseURL string) ([]Proxy, error) {
-	// 忽略传入的单源，直接爬取写死的所有多源列表
 	var allProxies []Proxy
 	seen := make(map[string]bool)
+	client := buildHTTPClient()
 
-	// 配置强力翻墙客户端，确保能拉下被墙的 GitHub raw
-	proxyURL, _ := url.Parse("http://127.0.0.1:7890")
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		},
-		Timeout: 30 * time.Second, // 防止单个源卡死
-	}
-	
 	for _, sourceUrl := range defaultSources {
 		log.Printf("[scraper] Fetching from: %s", sourceUrl)
-		
+
 		req, _ := http.NewRequest("GET", sourceUrl, nil)
 		resp, err := client.Do(req)
-		
+
 		if err != nil {
 			log.Printf("[scraper] source failed %s: %v", sourceUrl, err)
 			continue
 		}
-		
+
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
 			continue
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close() // 及时关闭
+		resp.Body.Close()
 		if err != nil {
 			continue
 		}
@@ -100,7 +113,7 @@ func Scrape(baseURL string) ([]Proxy, error) {
 	if total == 0 {
 		return nil, fmt.Errorf("all sources failed or returned 0 proxies")
 	}
-	
+
 	log.Printf("[scraper] 🎉 Total extracted raw proxies: %d", total)
 	return allProxies, nil
 }
